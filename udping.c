@@ -92,9 +92,10 @@ int main(int argc, char **argv) {
         // Wait for both threads to finish (they won't in this continuous server setup)
         pthread_join(threads[0], NULL);
         pthread_join(threads[1], NULL);
-
-        pthread_mutex_destroy(&lock); // Clean up the mutex
-        close(sock); // Close the server socket
+        // Clean up the mutex
+        pthread_mutex_destroy(&lock); 
+        // Close the server socket
+        close(sock); 
         return 0;
     }
 
@@ -102,12 +103,10 @@ int main(int argc, char **argv) {
     // Send and Receive pings
     else {
 
-        //printf("Enter the server address: ");
-        char server[30] = "172.30.245.244";
-        //scanf("%s", server);
-        //printf("Enter the message to send: ");
-        char echoString[30] = "Hello World!";
-        //scanf("%s", echoString);
+        //DO NOT FORGET TO CHANGE THIS
+        char server[30] = "172.30.245.244"; 
+        //Unused as of now
+        char echoString[30] = "PING";
         char servPort[6];
         snprintf(servPort, sizeof(servPort), "%d", pflag);
 
@@ -117,20 +116,22 @@ int main(int argc, char **argv) {
             DieWithSystemMessage("Client setup failed");
         }
 
+        // Set up the thread arguments
         ThreadArgs *args = malloc(sizeof(ThreadArgs));
         if (args == NULL) {
             DieWithSystemMessage("Failed to allocate memory for thread arguments");
         }
-
         args->sock = sock;
         args->addr = servAddr;
         args->packet_count = atoi(cflag);
         args->interval = iflag;
         args->size = sflag;
-        args->no_print = nflag;        
+        args->no_print = nflag;
 
-        pthread_t threads[2];  // Threads for sending and receiving
-        pthread_mutex_init(&lock, NULL);  // Initialize the mutex
+        // Threads for sending and receiving
+        pthread_t threads[2];  
+        // Initialize the mutex
+        pthread_mutex_init(&lock, NULL);  
 
         // Assign shared buffer for sending
         strcpy(buffer, echoString);
@@ -144,9 +145,9 @@ int main(int argc, char **argv) {
         // Join threads
         pthread_join(threads[0], NULL);
         pthread_join(threads[1], NULL);
-        printf("Client threads finished\n");
 
-        pthread_mutex_destroy(&lock); // Clean up the mutex
+        // Clean up the mutex and free the memory
+        pthread_mutex_destroy(&lock); 
         freeaddrinfo(servAddr);
         close(sock);
         exit(0);
