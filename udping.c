@@ -5,12 +5,14 @@
 *
 */
 
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <stdbool.h> 
-// #include "helper.c"
+#include "helper.h"
+
+// Global variables for shared use between threads
+struct sockaddr_storage clntAddr; // Client address storage
+socklen_t clntAddrLen = sizeof(clntAddr); // Length of the client address
+char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
+int bufferLength = 0; // Actual length of data in buffer
+pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
 
 int main(int argc, char **argv) {
     char cflag[30] = "0x7fffffff";
@@ -39,7 +41,8 @@ int main(int argc, char **argv) {
                 break;
             case 'p': // port number
                 pflag = atoi(optarg);
-                fprintf(stderr, "Port\t%10d\n", pflag);
+                //Redundant with the fprintf below
+                //fprintf(stderr, "Port\t%10d\n", pflag);
                 break;
             case 's': // size in bytes
                 sflag = atoi(optarg);
@@ -71,31 +74,92 @@ int main(int argc, char **argv) {
 
     /******SERVER******/
     // Receive and Send pings
-    /*
+
     if (serverflag) {
-        for (i = 0; i < atoi(cflag); i++) {
-            ReceivePing(sock); // Function prints out with stdout
-            SendPing(sock, address); 
-        }
+        char service[6];  // Buffer for port number as string
+        snprintf(service, sizeof(service), "%d", pflag);  // Convert port number to string
+        
+        int sock = setupServer(service); // Set up the server and get the socket descriptor
+        PrintLocalIP(); // Print the local IP address
+
+        pthread_t threads[2]; // Array to hold thread IDs
+        pthread_mutex_init(&lock, NULL); // Initialize the mutex for buffer access synchronization
+
+        // Create two threads for listening and sending
+        pthread_create(&threads[0], NULL, listenForConnections, &sock);
+        pthread_create(&threads[1], NULL, sendEcho, &sock);
+
+        // Wait for both threads to finish (they won't in this continuous server setup)
+        pthread_join(threads[0], NULL);
+        pthread_join(threads[1], NULL);
+
+        pthread_mutex_destroy(&lock); // Clean up the mutex
+        close(sock); // Close the server socket
+        return 0;
     }
-    */
 
     /******CLIENT******/
     // Send and Receive pings
-    /*
     else {
-        for (i = 0; i < atoi(cflag); i++) {
-            SendPing(sock, address);
-            ReceivePing(sock); // Function prints out with stdout
-        }
-    }
-    */
 
-   
+        printf("Enter the server address: ");
+        char server[30];
+        scanf("%s", server);
+        printf("Enter the message to send: ");
+        char echoString[30];
+        scanf("%s", echoString);
+        char servPort[6];
+        snprintf(servPort, sizeof(servPort), "%d", pflag);
+
+        struct addrinfo *servAddr;
+        int sock = setupClient(server, servPort, &servAddr);
+        if (sock < 0) {
+            DieWithSystemMessage("Client setup failed");
+        }
+
+        ThreadArgs *args = malloc(sizeof(ThreadArgs));
+        if (args == NULL) {
+            DieWithSystemMessage("Failed to allocate memory for thread arguments");
+        }
+
+        args->sock = sock;
+        args->addr = servAddr;
+        
+
+        pthread_t threads[2];  // Threads for sending and receiving
+        pthread_mutex_init(&lock, NULL);  // Initialize the mutex
+
+        // Assign shared buffer for sending
+        strcpy(buffer, echoString);
+        bufferLength = strlen(buffer);
+
+        struct addrinfo *result;
+        for (result = servAddr; result != NULL; result = result->ai_next) {
+            struct sockaddr_in *addr = (struct sockaddr_in *) result->ai_addr;
+            printf("Main(Family: %d - IP: %s - Port: %d)\n",
+                addr->sin_family,
+                inet_ntoa(addr->sin_addr),
+                ntohs(addr->sin_port));
+        }
+
+        
+
+        // Start threads
+        pthread_create(&threads[0], NULL, sendPing, args);
+        pthread_create(&threads[1], NULL, receiveResponse, args);
+
+        // Join threads
+        pthread_join(threads[0], NULL);
+        pthread_join(threads[1], NULL);
+
+        pthread_mutex_destroy(&lock); // Clean up the mutex
+        freeaddrinfo(servAddr);
+        close(sock);
+        exit(0);
+    }
 
     return 0;
 }
-
     /*
 
     int seqNumber;

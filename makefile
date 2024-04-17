@@ -6,14 +6,14 @@ CFLAGS = -std=gnu99 -pthread -g
 RM = rm -f
 
 # Source files
-COMMON_SOURCES = helperFunctions.c AddressUtility.c UDPEchoClient.c UDPEchoServer.c DieWithMessage.c
+COMMON_SOURCES = helper.c AddressUtility.c DieWithMessage.c
 CLIENT_SOURCES = udping.c $(COMMON_SOURCES)
 
 # Object files
 CLIENT_OBJECTS = $(CLIENT_SOURCES:.c=.o)
 
 # Executable names
-CLIENT_EXECUTABLE = udping
+CLIENT_EXECUTABLE = udping.exe
 
 all: $(CLIENT_EXECUTABLE) $(SERVER_EXECUTABLE) clean
 
@@ -25,8 +25,7 @@ clean:
 
 # Dependency rules for the object files
 udping.o: udping.c
+helper.o: helper.c
 AddressUtility.o: AddressUtility.c
-UDPEchoClient.0: UDPEchoClient.c
-UDPEchoServer.o: UDPEchoServer.c
 DieWithMessage.o: DieWithMessage.c
 
