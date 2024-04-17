@@ -14,12 +14,18 @@ char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
 int bufferLength = 0; // Actual length of data in buffer
 pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
 
+
+bool nflag;//no_print flag =false
+int *rtts;//array of round trip times
+int packetsSent;//number of packets sent
+int packetsReceived;//number of packets received
+
 int main(int argc, char **argv) {
     char cflag[30] = "0x7fffffff";
     float iflag = 1.0;
     int pflag = 33333;
     int sflag = 12;
-    bool nflag = false; 
+    nflag = false;
     bool serverflag = false;
     char *cvalue = NULL;
     int index;
@@ -66,6 +72,8 @@ int main(int argc, char **argv) {
         }
     }
 
+    
+
     for (index = optind; index < argc; index++)
         printf("Non-option argument %s\n", argv[index]);
 
@@ -102,25 +110,38 @@ int main(int argc, char **argv) {
     /******CLIENT******/
     // Send and Receive pings
     else {
+        // Get the server address from the command line
+        char *ipAddress = NULL;
+        if (optind < argc) {
+            ipAddress = argv[optind];
+        } else {
+            DieWithUserMessage("Usage: ", "<Server Address>");
+        }
+        char server[30];
+        strcpy(server, ipAddress);
 
-        //DO NOT FORGET TO CHANGE THIS
-        char server[30] = "172.30.245.244"; 
-        //Unused as of now
-        char echoString[30] = "PING";
+        // Convert the port number to a string
         char servPort[6];
         snprintf(servPort, sizeof(servPort), "%d", pflag);
 
+        //struct for the server address
         struct addrinfo *servAddr;
+        // Set up the client and get the socket descriptor
         int sock = setupClient(server, servPort, &servAddr);
         if (sock < 0) {
             DieWithSystemMessage("Client setup failed");
         }
-
+        // Allocate memory for round trip times
+        rtts = malloc(atoi(cflag) * sizeof(int));
+        if (rtts == NULL) {
+            DieWithSystemMessage("Failed to allocate memory for round trip times");
+        }
         // Set up the thread arguments
         ThreadArgs *args = malloc(sizeof(ThreadArgs));
         if (args == NULL) {
             DieWithSystemMessage("Failed to allocate memory for thread arguments");
         }
+        // Set the thread arguments
         args->sock = sock;
         args->addr = servAddr;
         args->packet_count = atoi(cflag);
@@ -131,20 +152,17 @@ int main(int argc, char **argv) {
         // Threads for sending and receiving
         pthread_t threads[2];  
         // Initialize the mutex
-        pthread_mutex_init(&lock, NULL);  
-
-        // Assign shared buffer for sending
-        strcpy(buffer, echoString);
-        bufferLength = strlen(buffer);        
+        pthread_mutex_init(&lock, NULL);        
 
         // Start threads
         pthread_create(&threads[0], NULL, sendPing, args);
         pthread_create(&threads[1], NULL, receiveResponse, args);
         
-
         // Join threads
         pthread_join(threads[0], NULL);
         pthread_join(threads[1], NULL);
+
+        printSummaryStats();
 
         // Clean up the mutex and free the memory
         pthread_mutex_destroy(&lock); 
