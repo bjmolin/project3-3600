@@ -102,12 +102,12 @@ int main(int argc, char **argv) {
     // Send and Receive pings
     else {
 
-        printf("Enter the server address: ");
-        char server[30];
-        scanf("%s", server);
-        printf("Enter the message to send: ");
-        char echoString[30];
-        scanf("%s", echoString);
+        //printf("Enter the server address: ");
+        char server[30] = "172.30.245.244";
+        //scanf("%s", server);
+        //printf("Enter the message to send: ");
+        char echoString[30] = "Hello World!";
+        //scanf("%s", echoString);
         char servPort[6];
         snprintf(servPort, sizeof(servPort), "%d", pflag);
 
@@ -124,33 +124,27 @@ int main(int argc, char **argv) {
 
         args->sock = sock;
         args->addr = servAddr;
-        
+        args->packet_count = atoi(cflag);
+        args->interval = iflag;
+        args->size = sflag;
+        args->no_print = nflag;        
 
         pthread_t threads[2];  // Threads for sending and receiving
         pthread_mutex_init(&lock, NULL);  // Initialize the mutex
 
         // Assign shared buffer for sending
         strcpy(buffer, echoString);
-        bufferLength = strlen(buffer);
-
-        struct addrinfo *result;
-        for (result = servAddr; result != NULL; result = result->ai_next) {
-            struct sockaddr_in *addr = (struct sockaddr_in *) result->ai_addr;
-            printf("Main(Family: %d - IP: %s - Port: %d)\n",
-                addr->sin_family,
-                inet_ntoa(addr->sin_addr),
-                ntohs(addr->sin_port));
-        }
-
-        
+        bufferLength = strlen(buffer);        
 
         // Start threads
         pthread_create(&threads[0], NULL, sendPing, args);
         pthread_create(&threads[1], NULL, receiveResponse, args);
+        
 
         // Join threads
         pthread_join(threads[0], NULL);
         pthread_join(threads[1], NULL);
+        printf("Client threads finished\n");
 
         pthread_mutex_destroy(&lock); // Clean up the mutex
         freeaddrinfo(servAddr);

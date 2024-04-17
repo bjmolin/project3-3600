@@ -106,15 +106,6 @@ int setupClient(const char *server, const char *servPort, struct addrinfo **serv
     addrCriteria.ai_protocol = IPPROTO_UDP;
 
     int rtnVal = getaddrinfo(server, servPort, &addrCriteria, servAddr);
-	
-	struct addrinfo *result;
-	for (result = *servAddr; result != NULL; result = result->ai_next) {
-		struct sockaddr_in *addr = (struct sockaddr_in *) result->ai_addr;
-		printf("setupClient(Family: %d - IP: %s - Port: %d)\n",
-			addr->sin_family,
-			inet_ntoa(addr->sin_addr),
-			ntohs(addr->sin_port));
-	}
 
     if (rtnVal != 0)
         DieWithUserMessage("getaddrinfo() failed", gai_strerror(rtnVal));
@@ -128,60 +119,279 @@ int setupClient(const char *server, const char *servPort, struct addrinfo **serv
 
 // Thread function to send pings to the server
 //CLIENT
+//Refactored does not currently work
+/*void* sendPing(void* arg) {
+    ThreadArgs *args = (ThreadArgs *) arg;
+    int sock = args->sock;
+    struct addrinfo *servAddr = args->addr;
+    int packetSize = args->size; // Size of the packet
+
+    char *pingBuffer = malloc(packetSize+30);
+    if (pingBuffer == NULL) {
+        perror("Failed to allocate memory for ping buffer");
+        exit(EXIT_FAILURE);
+    }
+
+    int count = 0;
+    while (count < args->packet_count) {
+        pthread_mutex_lock(&lock);
+
+        // Build the packet header and data
+        buildHeader(pingBuffer, packetSize, count);
+
+        // Send the prepared packet
+        ssize_t numBytes = sendto(sock, pingBuffer, strlen(pingBuffer), 0,
+                                  servAddr->ai_addr, servAddr->ai_addrlen);
+        if (numBytes < 0) {
+            perror("sendto() failed");
+            pthread_mutex_unlock(&lock);
+            free(pingBuffer);
+            exit(EXIT_FAILURE);
+        }
+
+        count++;
+        pthread_mutex_unlock(&lock);
+        printf("Packet %d sent, size: %d\n", count, packetSize);
+
+        usleep(500000); // Sleep for 0.5 seconds
+    }
+
+    printf("Total packets sent: %d\n", count);
+    free(pingBuffer);
+    return NULL;
+}*/
+
+// Thread function to send pings to the server
+//CLIENT
+//Currentl working
+//todo: refactor to use the ThreadArgs struct and buildHeader function
 void* sendPing(void* arg) {
     ThreadArgs *args = (ThreadArgs *) arg;
     int sock = args->sock;
     struct addrinfo *servAddr = args->addr;
 
-	struct addrinfo *result;
-	for (result = servAddr; result != NULL; result = result->ai_next) {
-		struct sockaddr_in *addr = (struct sockaddr_in *) result->ai_addr;
-		printf("sendPing( Family: %d - IP: %s - Port: %d)\n",
-			addr->sin_family,
-			inet_ntoa(addr->sin_addr),
-			ntohs(addr->sin_port));
+	
+	//clk_id is a macro set to CLOCK_REALTIME
+	struct timespec sendTime; // Time at which the packet was sent	
+
+	int count = 0; // Counter for sent packets
+	int interval = args->interval; // Interval between packets
+	int size = args->size; // Size of the packet
+
+
+	char *pingBuffer = malloc(size);
+	if (pingBuffer == NULL) {
+		DieWithSystemMessage("Failed to allocate memory for ping buffer");
 	}
 
-    while (true) {  // Consider using a condition for more control
+    while (count < args->packet_count) { 
         pthread_mutex_lock(&lock);
-        if (bufferLength > 0) {
-            ssize_t numBytes = sendto(sock, buffer, bufferLength, 0,
+		
+		clockid_t clk_id;
+
+		// Get current time
+        if (clock_gettime(clk_id, &sendTime) != 0) {
+            DieWithSystemMessage("clock_gettime() failed");
+        }
+
+        // Convert time to microseconds
+        long timeInMicroseconds = sendTime.tv_sec * 1000000 + sendTime.tv_nsec / 1000;
+
+        // Format the buffer to include the count and the time
+        int headerLength = snprintf(pingBuffer, size, "%d %ld ", count, timeInMicroseconds);
+        if (headerLength < 0) {
+            DieWithSystemMessage("snprintf() failed");
+        }
+
+		memset(pingBuffer + headerLength, 'A', size-headerLength);  // Fill the rest of the buffer with 'A'
+
+        if (strlen(pingBuffer) > 0) {
+            ssize_t numBytes = sendto(sock, pingBuffer, size, 0,
                                       servAddr->ai_addr, servAddr->ai_addrlen);
             if (numBytes < 0) {
                 DieWithSystemMessage("sendto() failed");
-            } else if (numBytes != bufferLength) {
+            } else if (numBytes != strlen(pingBuffer)) {
                 DieWithUserMessage("sendto() error", "sent unexpected number of bytes");
             }
-            bufferLength = 0;  // Reset buffer length after sending
+            //bufferLength = 0;  // Reset buffer length after sending
         }
+		count++;
         pthread_mutex_unlock(&lock);
-    }
+
+		double timeInSeconds = timeInMicroseconds / 1000000.0;
+
+		char dateTimeStr[80]; // Buffer to hold the formatted date and time string
+    	formatDateTime(timeInSeconds, dateTimeStr, sizeof(dateTimeStr));
+
+		printf("Sent packet %d at %s , size: %d\n", count, dateTimeStr, size);
+		
+		usleep(500000); //Sleep for .5 seconds
+		if (count == 10)
+			break;
+	}
+	printf("Packets sent: %d\n", count);
     return NULL;
 }
 
 // Thread function to receive responses from the server
 //CLIENT
+//Currently works, with parsePacket function, 
+//but parsePacket function is not testable because buildHeader function is not working
 void* receiveResponse(void* arg) {
-    int sock = *((int*) arg);
-    struct addrinfo *servAddr = (struct addrinfo *) arg;
+	ThreadArgs *args = (ThreadArgs *) arg;
+    int sock = args->sock;
+    struct addrinfo *servAddr = args->addr;
+	int count = 0;
+	int numPackets = 0; // Counter for received packets
+	struct timespec recvTime; // Time at which the packet was received
+	
+	// Set the receive timeout to 2 seconds
+	setRecvTimeout(sock, 2000); 
 
     while (true) {
         struct sockaddr_storage fromAddr;
         socklen_t fromAddrLen = sizeof(fromAddr);
-        pthread_mutex_lock(&lock);
-        ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0,
+		PacketInfo info;
+		char *tempString = (char*) malloc(MAXSTRINGLENGTH);
+		if (tempString == NULL) {
+			DieWithSystemMessage("Failed to allocate memory for temporary string");
+		}
+
+        // Receive a response
+        ssize_t numBytes = recvfrom(sock, tempString, MAXSTRINGLENGTH, 0,
                                     (struct sockaddr *) &fromAddr, &fromAddrLen);
+
+		//Handle the case where the recvfrom() function times out
         if (numBytes < 0) {
-            DieWithSystemMessage("recvfrom() failed");
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            	printf("recvfrom() timed out.\n");
+			} else
+            	DieWithSystemMessage("recvfrom() failed");
+		//Handle the case where the packet is received from an unknown source
         } else if (!SockAddrsEqual(servAddr->ai_addr, (struct sockaddr *) &fromAddr)) {
             DieWithUserMessage("recvfrom()", "received a packet from unknown source");
         }
+
+		//Handle the case where the packet is received successfully
+		else if (numBytes > 0){
+			numPackets++;
+			printf("Received: %s Size: %ld\n", tempString, numBytes);
+		}
+
+		// Parse the received packet
+		parsePacket(tempString, &info, strlen(tempString));
+
+		pthread_mutex_lock(&lock);
+
+		strcpy(buffer, tempString);
+		free(tempString);
         buffer[numBytes] = '\0';  // Null-terminate received data
         bufferLength = numBytes;
+		
         pthread_mutex_unlock(&lock);
-        printf("Received: %s\n", buffer);
+		count++;
+		if(count == args->packet_count)
+			break;
     }
+	printf("Packets received: %d\n", numPackets);
     return NULL;
+}
+
+// Function to set the receive timeout for a socket
+int setRecvTimeout(int sockfd, long millisec) {
+    struct timeval timeout;
+    timeout.tv_sec = millisec / 1000;           // Seconds
+    timeout.tv_usec = (millisec % 1000) * 1000; // Microseconds
+
+    // Set the receive timeout
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0) {
+        DieWithSystemMessage("setsockopt(SO_RCVTIMEO) failed");
+        return -1;
+    }
+    return 0;
+}
+
+void formatDateTime(double timeInSeconds, char *buffer, int bufferSize) {
+    // Convert timeInSeconds to time_t, truncating to remove fractional seconds if any
+    time_t rawTime = (time_t)timeInSeconds;
+
+    // Obtain the local time as a struct
+    struct tm *timeInfo;
+    timeInfo = localtime(&rawTime);
+
+    // Format the time into a string according to the desired format
+    // Here using the format YYYY-MM-DD HH:MM:SS, you can customize it as needed
+    strftime(buffer, bufferSize, "%Y-%m-%d %H:%M:%S", timeInfo);
+}
+
+// Function to build the packet header and fill the data
+//CLIENT
+//Currently not working
+void buildHeader(char *buffer, int size, int count) {
+    struct timespec sendTime;
+
+	
+	//clockid_t clk_id;
+	//SET_CLK_ID(clk_id);
+	//if (clock_gettime(clk_id, &sendTime) != 0)//segfaults for some reason
+
+
+    // Get current time
+    if (clock_gettime(CLOCK_REALTIME, &sendTime) != 0) {
+        perror("clock_gettime failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Convert time to microseconds
+    long timeInMicroseconds = sendTime.tv_sec * 1000000 + sendTime.tv_nsec / 1000;
+
+    // Format the buffer to include the count and the time with specified tags
+    int headerLength = snprintf(buffer, size, "s:%d:t:%ld:d:", count, timeInMicroseconds);
+    if (headerLength < 0) {
+        perror("snprintf failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Fill the rest of the buffer with 'A'
+    memset(buffer + headerLength, 'A', size - headerLength);  
+}
+
+//Function to parse the received packet and extract the sequence number, timestamp, and data
+//CLIENT
+//Currently working but not testable because buildHeader function is not working
+void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
+    int seqNum;
+    long sendTimeInMicroseconds;
+    char *data = (char *) malloc(packetSize);
+	clockid_t clk_id;
+
+    // Extract sequence number, timestamp, and data
+    if (sscanf(packet, "s:%d:t:%ld:d:%s", &seqNum, &sendTimeInMicroseconds, data) == 3) {
+        printf("Sequence Number: %d\n", seqNum);
+        printf("Timestamp (microseconds): %ld\n", sendTimeInMicroseconds);
+        printf("Data: %s\n", data);
+
+		// Store the extracted values in the PacketInfo structure
+		// Convert sendTimeInMicroseconds to timespec
+        info->sendTime.tv_sec = sendTimeInMicroseconds / 1000000;
+        info->sendTime.tv_nsec = (sendTimeInMicroseconds % 1000000) * 1000;
+
+        // Assume we immediately process the packet upon reception for simplicity
+        clock_gettime(clk_id, &info->receiveTime);
+
+        // Calculate Round Trip Time in milliseconds
+        info->rtt = (info->receiveTime.tv_sec - info->sendTime.tv_sec) * 1000.0
+                    + (info->receiveTime.tv_nsec - info->sendTime.tv_nsec) / 1000000.0;
+
+        info->dataSize = strlen(data);
+
+		// Print the calculated values
+		printf("Round Trip Time: %.3f ms\n", info->rtt);
+		printf("Data Size: %d\n", info->dataSize);
+
+    } else {
+        printf("Failed to parse the packet\n");
+    }
 }
 
 
