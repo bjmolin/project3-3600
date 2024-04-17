@@ -120,16 +120,16 @@ int setupClient(const char *server, const char *servPort, struct addrinfo **serv
 // Thread function to send pings to the server
 //CLIENT
 //Refactored does not currently work
-/*void* sendPing(void* arg) {
+void* sendPing(void* arg) {
     ThreadArgs *args = (ThreadArgs *) arg;
     int sock = args->sock;
     struct addrinfo *servAddr = args->addr;
-    int packetSize = args->size; // Size of the packet
+	int headerSize = 30;
+    int packetSize = args->size + headerSize; // Size of the packet
 
-    char *pingBuffer = malloc(packetSize+30);
+    char *pingBuffer = malloc(packetSize);
     if (pingBuffer == NULL) {
-        perror("Failed to allocate memory for ping buffer");
-        exit(EXIT_FAILURE);
+    	DieWithSystemMessage("Failed to allocate memory for ping buffer");
     }
 
     int count = 0;
@@ -143,93 +143,20 @@ int setupClient(const char *server, const char *servPort, struct addrinfo **serv
         ssize_t numBytes = sendto(sock, pingBuffer, strlen(pingBuffer), 0,
                                   servAddr->ai_addr, servAddr->ai_addrlen);
         if (numBytes < 0) {
-            perror("sendto() failed");
-            pthread_mutex_unlock(&lock);
-            free(pingBuffer);
-            exit(EXIT_FAILURE);
+			free(pingBuffer);
+			pthread_mutex_unlock(&lock);
+            DieWithSystemMessage("sendto() failed");
         }
 
         count++;
         pthread_mutex_unlock(&lock);
         printf("Packet %d sent, size: %d\n", count, packetSize);
 
-        usleep(500000); // Sleep for 0.5 seconds
+        //usleep(500000); // Sleep for 0.5 seconds
     }
 
     printf("Total packets sent: %d\n", count);
     free(pingBuffer);
-    return NULL;
-}*/
-
-// Thread function to send pings to the server
-//CLIENT
-//Currentl working
-//todo: refactor to use the ThreadArgs struct and buildHeader function
-void* sendPing(void* arg) {
-    ThreadArgs *args = (ThreadArgs *) arg;
-    int sock = args->sock;
-    struct addrinfo *servAddr = args->addr;
-
-	
-	//clk_id is a macro set to CLOCK_REALTIME
-	struct timespec sendTime; // Time at which the packet was sent	
-
-	int count = 0; // Counter for sent packets
-	int interval = args->interval; // Interval between packets
-	int size = args->size; // Size of the packet
-
-
-	char *pingBuffer = malloc(size);
-	if (pingBuffer == NULL) {
-		DieWithSystemMessage("Failed to allocate memory for ping buffer");
-	}
-
-    while (count < args->packet_count) { 
-        pthread_mutex_lock(&lock);
-		
-		clockid_t clk_id;
-
-		// Get current time
-        if (clock_gettime(clk_id, &sendTime) != 0) {
-            DieWithSystemMessage("clock_gettime() failed");
-        }
-
-        // Convert time to microseconds
-        long timeInMicroseconds = sendTime.tv_sec * 1000000 + sendTime.tv_nsec / 1000;
-
-        // Format the buffer to include the count and the time
-        int headerLength = snprintf(pingBuffer, size, "%d %ld ", count, timeInMicroseconds);
-        if (headerLength < 0) {
-            DieWithSystemMessage("snprintf() failed");
-        }
-
-		memset(pingBuffer + headerLength, 'A', size-headerLength);  // Fill the rest of the buffer with 'A'
-
-        if (strlen(pingBuffer) > 0) {
-            ssize_t numBytes = sendto(sock, pingBuffer, size, 0,
-                                      servAddr->ai_addr, servAddr->ai_addrlen);
-            if (numBytes < 0) {
-                DieWithSystemMessage("sendto() failed");
-            } else if (numBytes != strlen(pingBuffer)) {
-                DieWithUserMessage("sendto() error", "sent unexpected number of bytes");
-            }
-            //bufferLength = 0;  // Reset buffer length after sending
-        }
-		count++;
-        pthread_mutex_unlock(&lock);
-
-		double timeInSeconds = timeInMicroseconds / 1000000.0;
-
-		char dateTimeStr[80]; // Buffer to hold the formatted date and time string
-    	formatDateTime(timeInSeconds, dateTimeStr, sizeof(dateTimeStr));
-
-		printf("Sent packet %d at %s , size: %d\n", count, dateTimeStr, size);
-		
-		usleep(500000); //Sleep for .5 seconds
-		if (count == 10)
-			break;
-	}
-	printf("Packets sent: %d\n", count);
     return NULL;
 }
 
@@ -331,15 +258,12 @@ void buildHeader(char *buffer, int size, int count) {
     struct timespec sendTime;
 
 	
-	//clockid_t clk_id;
-	//SET_CLK_ID(clk_id);
+	clockid_t clk_id = CLOCK_REALTIME;
 	//if (clock_gettime(clk_id, &sendTime) != 0)//segfaults for some reason
 
-
     // Get current time
-    if (clock_gettime(CLOCK_REALTIME, &sendTime) != 0) {
-        perror("clock_gettime failed");
-        exit(EXIT_FAILURE);
+    if (clock_gettime(clk_id, &sendTime) != 0) {
+        DieWithSystemMessage("clock_gettime() failed");
     }
 
     // Convert time to microseconds
@@ -348,12 +272,11 @@ void buildHeader(char *buffer, int size, int count) {
     // Format the buffer to include the count and the time with specified tags
     int headerLength = snprintf(buffer, size, "s:%d:t:%ld:d:", count, timeInMicroseconds);
     if (headerLength < 0) {
-        perror("snprintf failed");
-        exit(EXIT_FAILURE);
+        DieWithSystemMessage("snprintf() failed");
     }
 
     // Fill the rest of the buffer with 'A'
-    memset(buffer + headerLength, 'A', size - headerLength);  
+    memset(buffer + headerLength, 'A', size - headerLength);
 }
 
 //Function to parse the received packet and extract the sequence number, timestamp, and data
