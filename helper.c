@@ -120,7 +120,6 @@ int setupClient(const char *server, const char *servPort, struct addrinfo **serv
 
 // Thread function to send pings to the server
 //CLIENT
-//Refactored does not currently work
 void* sendPing(void* arg) {
     ThreadArgs *args = (ThreadArgs *) arg;
     int sock = args->sock;
@@ -133,21 +132,36 @@ void* sendPing(void* arg) {
     	DieWithSystemMessage("Failed to allocate memory for ping buffer");
     }
 
+    // Calculate the start time and ping interval in microseconds
+    struct timespec nextSendTime;
+    clock_gettime(CLOCK_REALTIME, &nextSendTime);
+    long pingIntervalUs = args->interval * 1000000;
+
     int count = 0;
     while (count < packetCount) {
         pthread_mutex_lock(&lock);
 
-        // Build the packet header and data
-        buildHeader(pingBuffer, packetSize, count);
-
-        // Send the prepared packet
-        ssize_t numBytes = sendto(sock, pingBuffer, strlen(pingBuffer), 0,
-                                  servAddr->ai_addr, servAddr->ai_addrlen);
-        if (numBytes < 0) {
-			free(pingBuffer);
-			pthread_mutex_unlock(&lock);
-            DieWithSystemMessage("sendto() failed");
+        // Calculate next send time: start_time + (seq# - 1) * pingInterval
+        if (count > 0) {
+            timespec_add_us(&nextSendTime, pingIntervalUs);
         }
+
+        // Wait until the next scheduled send time
+        int waitResult = pthread_cond_timedwait(&cond, &lock, &nextSendTime);
+        if (waitResult == ETIMEDOUT) {
+            // Build the packet header and data
+            buildHeader(pingBuffer, packetSize, count);
+
+            // Send the prepared packet
+            ssize_t numBytes = sendto(sock, pingBuffer, packetSize, 0,
+                                      servAddr->ai_addr, servAddr->ai_addrlen);
+            if (numBytes < 0) {
+                free(pingBuffer);
+                pthread_mutex_unlock(&lock);
+                DieWithSystemMessage("sendto() failed");
+            }
+        }
+
 
 		count++;
 		//Store the number of packets sent in the global variable
@@ -157,7 +171,7 @@ void* sendPing(void* arg) {
 		//Uncomment this line to see the packets being sent
         //printf("Packet %d sent, size: %d\n", count, packetSize);
 
-        usleep(500000); // Sleep for 0.5 seconds
+        
     }
 
     free(pingBuffer);
@@ -210,11 +224,12 @@ void* receiveResponse(void* arg) {
 		//Handle the case where the packet is received successfully
 		else if (numBytes > 0){
 			numPackets++;
+            // Parse the received packet
+		    parsePacket(tempString, &info, sizeof(tempString));
 			//printf("Received: %s Size: %ld\n", tempString, numBytes);
 		}
 
-		// Parse the received packet
-		parsePacket(tempString, &info, sizeof(tempString));
+		
 
 		//Lock the mutex
 		pthread_mutex_lock(&lock);
@@ -231,9 +246,7 @@ void* receiveResponse(void* arg) {
 		count++;
 		if(count >= packetCount)
 			break;
-		
     }
-	
     return NULL;
 }
 
@@ -333,12 +346,14 @@ void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
 		//Lock the mutex
 		pthread_mutex_lock(&lock);
 		//Store the RTT in the global array
+
 		rtts[seqNum-1] = info->rtt;
 		//Unlock the mutex
 		pthread_mutex_unlock(&lock);
 
     } else {
         printf("Failed to parse the packet\n");
+        rtts[seqNum-1] = 2000;
     }
 }
 
@@ -371,11 +386,19 @@ float calculateMinRTT(){
 }
 
 float calculateTotalRTT(){
+    struct timespec sendTime2;
 	float sum = 0;
-	for(int i = 0; i < packetsReceived; i++){
-		sum += rtts[i];
-	}
-	return sum;
+    clockid_t clk_id = CLOCK_REALTIME;
+	//if (clock_gettime(clk_id, &sendTime) != 0)//segfaults for some reason
+
+    // Get current time
+    if (clock_gettime(clk_id, &sendTime2) != 0) {
+        DieWithSystemMessage("clock_gettime() failed");
+    }
+    long timeInMs = sendTime2.tv_sec;
+    printf("Time in ms: %ld\n", timeInMs);
+    printf("RTT[0]: %f\n", rtts[0]);
+	return rtts[0] + (float)timeInMs;
 }
 
 void printSummaryStats(){
@@ -383,7 +406,12 @@ void printSummaryStats(){
 	float max = calculateMaxRTT();
 	float min = calculateMinRTT();
 	float total = calculateTotalRTT();
-	float packetLossPercent = 100- ((packetsSent/packetsReceived)*100);
+	float packetLossPercent = 0.0;
+    int failures = packetsSent - packetsReceived;
+    if (failures > 0) {
+        packetLossPercent = (float)failures / packetsSent * 100;
+    }
+    
 	printf("%d packets transmitted, %d packets received, %.2f%% packet loss, time %.3f ms\n", 
 		packetsSent, packetsReceived, packetLossPercent, total);
 	printf("rtt min/avg/max = %.3f/%.3f/%.3f ms\n", min, avg, max);
@@ -401,5 +429,13 @@ void handle_sigint(int sig) {
     exit(0);
 }
 
+// Function to add a specified number of microseconds to a timespec
+void timespec_add_us(struct timespec *t, long us) {
+    t->tv_nsec += us * 1000;
+    if (t->tv_nsec >= 1000000000) {
+        t->tv_nsec -= 1000000000;
+        t->tv_sec += 1;
+    }
+}
 
 

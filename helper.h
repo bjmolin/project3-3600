@@ -43,6 +43,7 @@ extern double *rtts; //array of round trip times
 extern int packetsSent; //number of packets sent
 extern int packetsReceived; //number of packets received
 extern int packetCount; //number of packets to send
+extern pthread_cond_t cond;
 
 typedef struct {
     int sock;
@@ -85,5 +86,7 @@ float calculateMinRTT();
 void printSummaryStats();
 
 void handle_sigint(int sig);
+
+void timespec_add_us(struct timespec *t, long us);
 
 #endif // HELPER_H_
