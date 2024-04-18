@@ -13,12 +13,12 @@ socklen_t clntAddrLen = sizeof(clntAddr); // Length of the client address
 char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
 int bufferLength = 0; // Actual length of data in buffer
 pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
-
-
+pthread_mutex_t cond;
 bool nflag;//no_print flag =false
-int *rtts;//array of round trip times
+double *rtts;//array of round trip times
 int packetsSent;//number of packets sent
 int packetsReceived;//number of packets received
+int packetCount;//number of packets to send
 
 int main(int argc, char **argv) {
     char cflag[30] = "0x7fffffff";
@@ -30,6 +30,11 @@ int main(int argc, char **argv) {
     char *cvalue = NULL;
     int index;
     int c;
+
+    // Register the signal handler
+    /*if (signal(SIGINT, handle_sigint) == SIG_ERR) {
+        printf("Can't catch SIGINT\n");
+    }*/
     
     opterr = 0;
     // c:i:p:s:n contains the flags we will use but I don't recall 
@@ -144,10 +149,11 @@ int main(int argc, char **argv) {
         // Set the thread arguments
         args->sock = sock;
         args->addr = servAddr;
-        args->packet_count = atoi(cflag);
         args->interval = iflag;
         args->size = sflag;
         args->no_print = nflag;
+
+        packetCount = atoi(cflag);
 
         // Threads for sending and receiving
         pthread_t threads[2];  
