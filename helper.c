@@ -167,15 +167,18 @@ void* sendPing(void* arg) {
                 DieWithSystemMessage("sendto() failed");
             }
 
-            count++;            
-            printf("Packet %d sent, size: %d\n", count, packetSize);
-
-            //usleep(500000); // Sleep for 0.5 seconds
-        }
+		count++;
+		//Store the number of packets sent in the global variable
+		int packetsSent = count;
         pthread_mutex_unlock(&lock);
+		printf("Packets sent: %d\n", packetsSent);
+
+		//Uncomment this line to see the packets being sent
+        //printf("Packet %d sent, size: %d\n", count, packetSize);
+
+        usleep(500000); // Sleep for 0.5 seconds
     }
 
-    printf("Total packets sent: %d\n", count);
     free(pingBuffer);
     return NULL;
 }
@@ -196,9 +199,13 @@ void* receiveResponse(void* arg) {
 	setRecvTimeout(sock, 2000); 
 
     while (true) {
+		//Create a 
         struct sockaddr_storage fromAddr;
+		//Get the length of the address
         socklen_t fromAddrLen = sizeof(fromAddr);
+		//Create a PacketInfo structure to store the received packet information
 		PacketInfo info;
+		//Allocate memory for the temporary string
 		char *tempString = (char*) malloc(MAXSTRINGLENGTH);
 		if (tempString == NULL) {
 			DieWithSystemMessage("Failed to allocate memory for temporary string");
@@ -222,25 +229,30 @@ void* receiveResponse(void* arg) {
 		//Handle the case where the packet is received successfully
 		else if (numBytes > 0){
 			numPackets++;
-			printf("Received: %s Size: %ld\n", tempString, numBytes);
+			//printf("Received: %s Size: %ld\n", tempString, numBytes);
 		}
 
 		// Parse the received packet
-		parsePacket(tempString, &info, strlen(tempString));
+		parsePacket(tempString, &info, sizeof(tempString));
 
+		//Lock the mutex
 		pthread_mutex_lock(&lock);
-
+		//Store the number of packets received in the global variable
+		packetsReceived = numPackets;
+		//copy the received packet to the global buffer
+		//not currently used, but nice to have
 		strcpy(buffer, tempString);
 		free(tempString);
         buffer[numBytes] = '\0';  // Null-terminate received data
         bufferLength = numBytes;
-		
+		//Unlock the mutex
         pthread_mutex_unlock(&lock);
 		count++;
 		if(count == args->packet_count)
 			break;
+		
     }
-	printf("Packets received: %d\n", numPackets);
+	
     return NULL;
 }
 
@@ -290,7 +302,7 @@ void buildHeader(char *buffer, int size, int count) {
     long timeInMicroseconds = sendTime.tv_sec * 1000000 + sendTime.tv_nsec / 1000;
 
     // Format the buffer to include the count and the time with specified tags
-    int headerLength = snprintf(buffer, size, "s:%d:t:%ld:d:", count, timeInMicroseconds);
+    int headerLength = snprintf(buffer, size, "s:%d:t:%ld:d:", count+1, timeInMicroseconds);
     if (headerLength < 0) {
         DieWithSystemMessage("snprintf() failed");
     }
@@ -310,9 +322,7 @@ void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
 
     // Extract sequence number, timestamp, and data
     if (sscanf(packet, "s:%d:t:%ld:d:%s", &seqNum, &sendTimeInMicroseconds, data) == 3) {
-        printf("Sequence Number: %d\n", seqNum);
-        printf("Timestamp (microseconds): %ld\n", sendTimeInMicroseconds);
-        printf("Data: %s\n", data);
+        
 
 		// Store the extracted values in the PacketInfo structure
 		// Convert sendTimeInMicroseconds to timespec
@@ -326,15 +336,88 @@ void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
         info->rtt = (info->receiveTime.tv_sec - info->sendTime.tv_sec) * 1000.0
                     + (info->receiveTime.tv_nsec - info->sendTime.tv_nsec) / 1000000.0;
 
-        info->dataSize = strlen(data);
+        info->dataSize = sizeof(data);
 
-		// Print the calculated values
-		printf("Round Trip Time: %.3f ms\n", info->rtt);
-		printf("Data Size: %d\n", info->dataSize);
+		if (!nflag){// Print the calculated values
+			//printf("%d\t%d\t%.4f", seqNum, info->dataSize, info->rtt);
+			printf("%-10d%-10d%-10.4f\n", seqNum, info->dataSize, info->rtt);
+
+			//My perfereed way to print the data
+			//printf("Sequence Number: %d\n", seqNum);
+        	//printf("Timestamp (microseconds): %ld\n", sendTimeInMicroseconds);
+        	//printf("Data: %s\n", data);
+			//printf("Round Trip Time: %.3f ms\n", info->rtt);
+			//printf("Data Size: %d\n", info->dataSize);
+		}
+		//Lock the mutex
+		pthread_mutex_lock(&lock);
+		//Store the RTT in the global array
+		rtts[info->seq-1] = info->rtt;
+		//Unlock the mutex
+		pthread_mutex_unlock(&lock);
 
     } else {
         printf("Failed to parse the packet\n");
     }
+}
+
+float calculateAverageRTT(){
+	float sum = 0;
+	for(int i = 0; i < packetsReceived; i++){
+		sum += rtts[i];
+	}
+	return sum/packetsReceived;
+}
+
+float calculateMaxRTT(){
+	float max = 0;
+	for(int i = 0; i < packetsReceived; i++){
+		if(rtts[i] > max){
+			max = rtts[i];
+		}
+	}
+	return max;
+}
+
+float calculateMinRTT(){
+	float min = rtts[0];
+	for(int i = 0; i < packetsReceived; i++){
+		if(rtts[i] < min){
+			min = rtts[i];
+		}
+	}
+	return min;
+}
+
+float calculateTotalRTT(){
+	float sum = 0;
+	for(int i = 0; i < packetsReceived; i++){
+		sum += rtts[i];
+	}
+	return sum;
+}
+
+void printSummaryStats(){
+	float avg = calculateAverageRTT();
+	float max = calculateMaxRTT();
+	float min = calculateMinRTT();
+	float total = calculateTotalRTT();
+	float packetLossPercent = 100- ((packetsSent/packetsReceived)*100);
+	printf("%d packets transmitted, %d packets received, %.2f%% packet loss, time %.3f ms\n", 
+		packetsSent, packetsReceived, packetLossPercent, total);
+	printf("rtt min/avg/max = %.3f/%.3f/%.3f ms\n", min, avg, max);
+}
+
+// Function to be called when SIGINT is received
+void handle_sigint(int sig) {
+    printf("Caught signal %d\n", sig);
+    printf("Printing statistics before exiting...\n");
+    
+    // Print the summary statistics
+	printSummaryStats();
+
+    // Exit the program
+    exit(0);
 }
 
 
