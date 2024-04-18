@@ -132,27 +132,47 @@ void* sendPing(void* arg) {
     	DieWithSystemMessage("Failed to allocate memory for ping buffer");
     }
 
+    struct timespec next_send_time;
+    double interval_ns = args->interval * 1000000000;
+    clock_gettime(CLOCK_REALTIME, &next_send_time);
+
     int count = 0;
     while (count < args->packet_count) {
         pthread_mutex_lock(&lock);
 
-        // Build the packet header and data
-        buildHeader(pingBuffer, packetSize, count);
+        /*pthread_cond_timedwait()*/
+        // Calculate next send time
+        next_send_time.tv_sec += (int)((interval_ns*count) / 1e9);
+        next_send_time.tv_nsec += (int)(interval_ns*count) % (int)1e9;
 
-        // Send the prepared packet
-        ssize_t numBytes = sendto(sock, pingBuffer, strlen(pingBuffer), 0,
-                                  servAddr->ai_addr, servAddr->ai_addrlen);
-        if (numBytes < 0) {
-			free(pingBuffer);
-			pthread_mutex_unlock(&lock);
-            DieWithSystemMessage("sendto() failed");
+        // Correct nanosecond overflow
+        if (next_send_time.tv_nsec >= 1e9) {
+            next_send_time.tv_sec++;
+            next_send_time.tv_nsec -= 1e9;
         }
 
-        count++;
-        pthread_mutex_unlock(&lock);
-        printf("Packet %d sent, size: %d\n", count, packetSize);
+        // Waits till the next packet's turn
+        int result = pthread_cond_timedwait(&cond, &lock, &next_send_time);
+        if (result == ETIMEDOUT) {
 
-        //usleep(500000); // Sleep for 0.5 seconds
+            // Build the packet header and data
+            buildHeader(pingBuffer, packetSize, count);
+
+            // Send the prepared packet
+            ssize_t numBytes = sendto(sock, pingBuffer, strlen(pingBuffer), 0,
+                                    servAddr->ai_addr, servAddr->ai_addrlen);
+            if (numBytes < 0) {
+                free(pingBuffer);
+                pthread_mutex_unlock(&lock);
+                DieWithSystemMessage("sendto() failed");
+            }
+
+            count++;            
+            printf("Packet %d sent, size: %d\n", count, packetSize);
+
+            //usleep(500000); // Sleep for 0.5 seconds
+        }
+        pthread_mutex_unlock(&lock);
     }
 
     printf("Total packets sent: %d\n", count);
@@ -301,7 +321,7 @@ void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
 
         // Assume we immediately process the packet upon reception for simplicity
         clock_gettime(clk_id, &info->receiveTime);
-
+        
         // Calculate Round Trip Time in milliseconds
         info->rtt = (info->receiveTime.tv_sec - info->sendTime.tv_sec) * 1000.0
                     + (info->receiveTime.tv_nsec - info->sendTime.tv_nsec) / 1000000.0;

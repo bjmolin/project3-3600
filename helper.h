@@ -38,7 +38,7 @@ extern socklen_t clntAddrLen; // Length of the client address
 extern char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
 extern int bufferLength; // Actual length of data in buffer
 extern pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
-
+extern pthread_mutex_t cond;
 
 typedef struct {
     int sock;
