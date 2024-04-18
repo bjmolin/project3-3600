@@ -6,6 +6,7 @@
 */
 
 #include "helper.h"
+float elapsedTime = 0;
 
 void PrintLocalIP() {
     struct ifaddrs *addrs, *tmp;
@@ -136,7 +137,7 @@ void* sendPing(void* arg) {
     struct timespec nextSendTime;
     clock_gettime(CLOCK_REALTIME, &nextSendTime);
     long pingIntervalUs = args->interval * 1000000;
-
+    startTimer();
     int count = 0;
     while (count < packetCount) {
         pthread_mutex_lock(&lock);
@@ -170,10 +171,8 @@ void* sendPing(void* arg) {
 
 		//Uncomment this line to see the packets being sent
         //printf("Packet %d sent, size: %d\n", count, packetSize);
-
         
     }
-
     free(pingBuffer);
     return NULL;
 }
@@ -225,11 +224,9 @@ void* receiveResponse(void* arg) {
 		else if (numBytes > 0){
 			numPackets++;
             // Parse the received packet
-		    parsePacket(tempString, &info, sizeof(tempString));
+		    parsePacket(tempString, &info, numBytes-30);
 			//printf("Received: %s Size: %ld\n", tempString, numBytes);
 		}
-
-		
 
 		//Lock the mutex
 		pthread_mutex_lock(&lock);
@@ -330,11 +327,11 @@ void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
         info->rtt = (info->receiveTime.tv_sec - info->sendTime.tv_sec) * 1000.0
                     + (info->receiveTime.tv_nsec - info->sendTime.tv_nsec) / 1000000.0;
 
-        info->dataSize = sizeof(data);
+        info->dataSize = packetSize;
 
 		if (!nflag){// Print the calculated values
 			//printf("%d\t%d\t%.4f", seqNum, info->dataSize, info->rtt);
-			printf("%-10d%-10d%-10.4f\n", seqNum, info->dataSize, info->rtt);
+			printf("%-10d%-10d%-10.4f\n", seqNum, packetSize, info->rtt);
 
 			//My perfereed way to print the data
 			//printf("Sequence Number: %d\n", seqNum);
@@ -386,19 +383,7 @@ float calculateMinRTT(){
 }
 
 float calculateTotalRTT(){
-    struct timespec sendTime2;
-	float sum = 0;
-    clockid_t clk_id = CLOCK_REALTIME;
-	//if (clock_gettime(clk_id, &sendTime) != 0)//segfaults for some reason
-
-    // Get current time
-    if (clock_gettime(clk_id, &sendTime2) != 0) {
-        DieWithSystemMessage("clock_gettime() failed");
-    }
-    long timeInMs = sendTime2.tv_sec;
-    printf("Time in ms: %ld\n", timeInMs);
-    printf("RTT[0]: %f\n", rtts[0]);
-	return rtts[0] + (float)timeInMs;
+   return endTimer();
 }
 
 void printSummaryStats(){
@@ -436,6 +421,18 @@ void timespec_add_us(struct timespec *t, long us) {
         t->tv_nsec -= 1000000000;
         t->tv_sec += 1;
     }
+}
+
+void startTimer() {
+    clock_gettime(CLOCK_MONOTONIC, &startTime);
+}
+
+float endTimer() {
+    clock_gettime(CLOCK_MONOTONIC, &endTime);
+    long secDiff = endTime.tv_sec - startTime.tv_sec;
+    long nsecDiff = endTime.tv_nsec - startTime.tv_nsec;
+    float totalDiff = secDiff * 1000.0f + nsecDiff / 1000000.0f; // Convert total difference to milliseconds
+    return totalDiff;
 }
 
 

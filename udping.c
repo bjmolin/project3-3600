@@ -20,6 +20,9 @@ int packetsSent;//number of packets sent
 int packetsReceived;//number of packets received
 int packetCount;//number of packets to send
 
+struct timespec startTime, endTime;//for total time calculation
+
+
 int main(int argc, char **argv) {
     char cflag[30] = "0x7fffffff";
     float iflag = 1.0;

@@ -45,6 +45,8 @@ extern int packetsReceived; //number of packets received
 extern int packetCount; //number of packets to send
 extern pthread_cond_t cond;
 
+extern struct timespec startTime, endTime;
+
 typedef struct {
     int sock;
 	int interval;
@@ -88,5 +90,8 @@ void printSummaryStats();
 void handle_sigint(int sig);
 
 void timespec_add_us(struct timespec *t, long us);
+
+void startTimer();
+float endTimer();
 
 #endif // HELPER_H_
