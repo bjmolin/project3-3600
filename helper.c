@@ -117,6 +117,7 @@ int setupClient(const char *server, const char *servPort, struct addrinfo **serv
     return sock;
 }
 
+
 // Thread function to send pings to the server
 //CLIENT
 //Refactored does not currently work
@@ -133,7 +134,7 @@ void* sendPing(void* arg) {
     }
 
     int count = 0;
-    while (count < args->packet_count) {
+    while (count < packetCount) {
         pthread_mutex_lock(&lock);
 
         // Build the packet header and data
@@ -150,9 +151,8 @@ void* sendPing(void* arg) {
 
 		count++;
 		//Store the number of packets sent in the global variable
-		int packetsSent = count;
+		packetsSent = count;
         pthread_mutex_unlock(&lock);
-		printf("Packets sent: %d\n", packetsSent);
 
 		//Uncomment this line to see the packets being sent
         //printf("Packet %d sent, size: %d\n", count, packetSize);
@@ -229,7 +229,7 @@ void* receiveResponse(void* arg) {
 		//Unlock the mutex
         pthread_mutex_unlock(&lock);
 		count++;
-		if(count == args->packet_count)
+		if(count >= packetCount)
 			break;
 		
     }
@@ -333,7 +333,7 @@ void parsePacket(const char *packet, PacketInfo *info, int packetSize) {
 		//Lock the mutex
 		pthread_mutex_lock(&lock);
 		//Store the RTT in the global array
-		rtts[info->seq-1] = info->rtt;
+		rtts[seqNum-1] = info->rtt;
 		//Unlock the mutex
 		pthread_mutex_unlock(&lock);
 

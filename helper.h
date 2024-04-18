@@ -39,13 +39,13 @@ extern char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
 extern int bufferLength; // Actual length of data in buffer
 extern pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
 extern bool nflag; //no_print flag =false
-extern int *rtts; //array of round trip times
+extern double *rtts; //array of round trip times
 extern int packetsSent; //number of packets sent
 extern int packetsReceived; //number of packets received
+extern int packetCount; //number of packets to send
 
 typedef struct {
     int sock;
-	int packet_count;
 	int interval;
 	int size;
 	bool no_print;
@@ -83,5 +83,7 @@ float calculateAverageRTT();
 float calculateMaxRTT();
 float calculateMinRTT();
 void printSummaryStats();
+
+void handle_sigint(int sig);
 
 #endif // HELPER_H_
