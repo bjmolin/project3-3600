@@ -13,15 +13,12 @@ socklen_t clntAddrLen = sizeof(clntAddr); // Length of the client address
 char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
 int bufferLength = 0; // Actual length of data in buffer
 pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
-pthread_mutex_t cond;
-
-
+pthread_cond_t cond;
 bool nflag;//no_print flag =false
 double *rtts;//array of round trip times
 int packetsSent;//number of packets sent
 int packetsReceived;//number of packets received
 int packetCount;//number of packets to send
-
 
 int main(int argc, char **argv) {
     char cflag[30] = "0x7fffffff";
@@ -31,14 +28,10 @@ int main(int argc, char **argv) {
     nflag = false;
     bool serverflag = false;
     char *cvalue = NULL;
-    char *ipAddress = NULL; 
     int index;
     int c;
 
-    // Register the signal handler
-    /*if (signal(SIGINT, handle_sigint) == SIG_ERR) {
-        printf("Can't catch SIGINT\n");
-    }*/
+    
     
     opterr = 0;
     // c:i:p:s:n contains the flags we will use but I don't recall 
@@ -101,7 +94,6 @@ int main(int argc, char **argv) {
 
         pthread_t threads[2]; // Array to hold thread IDs
         pthread_mutex_init(&lock, NULL); // Initialize the mutex for buffer access synchronization
-        pthread_mutex_init(&cond, NULL);
 
         // Create two threads for listening and sending
         pthread_create(&threads[0], NULL, listenForConnections, &sock);
@@ -120,6 +112,11 @@ int main(int argc, char **argv) {
     /******CLIENT******/
     // Send and Receive pings
     else {
+
+        //Register the signal handler
+        if (signal(SIGINT, handle_sigint) == SIG_ERR) {
+            printf("Can't catch SIGINT\n");
+        }
         // Get the server address from the command line
         char *ipAddress = NULL;
         if (optind < argc) {
@@ -129,9 +126,8 @@ int main(int argc, char **argv) {
         }
         char server[30];
         strcpy(server, ipAddress);
-        
-        //Unused as of now
-        char echoString[30] = "PING";
+
+        // Convert the port number to a string
         char servPort[6];
         snprintf(servPort, sizeof(servPort), "%d", pflag);
 
@@ -165,12 +161,6 @@ int main(int argc, char **argv) {
         pthread_t threads[2];  
         // Initialize the mutex
         pthread_mutex_init(&lock, NULL);        
-        pthread_mutex_init(&lock, NULL);  
-        pthread_mutex_init(&cond, NULL);
-
-        // Assign shared buffer for sending
-        strcpy(buffer, echoString);
-        bufferLength = strlen(buffer);        
 
         // Start threads
         pthread_create(&threads[0], NULL, sendPing, args);
