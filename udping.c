@@ -123,11 +123,7 @@ int main(int argc, char **argv) {
         }
         char server[30];
         strcpy(server, ipAddress);
-        }
         
-        //DO NOT FORGET TO CHANGE THIS
-        char server[30];
-        strcpy(server, ipAddress);
         //Unused as of now
         char echoString[30] = "PING";
         char servPort[6];
