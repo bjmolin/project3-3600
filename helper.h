@@ -38,11 +38,13 @@ extern socklen_t clntAddrLen; // Length of the client address
 extern char buffer[MAXSTRINGLENGTH]; // Buffer for incoming and outgoing data
 extern int bufferLength; // Actual length of data in buffer
 extern pthread_mutex_t lock; // Mutex for synchronizing access to the buffer
+extern pthread_mutex_t cond; 
 extern bool nflag; //no_print flag =false
 extern double *rtts; //array of round trip times
 extern int packetsSent; //number of packets sent
 extern int packetsReceived; //number of packets received
 extern int packetCount; //number of packets to send
+
 
 typedef struct {
     int sock;
