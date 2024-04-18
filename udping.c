@@ -123,13 +123,6 @@ int main(int argc, char **argv) {
         }
         char server[30];
         strcpy(server, ipAddress);
-
-        // Convert the port number to a string
-        char *ipAddress = NULL;
-        if (optind < argc) {
-            ipAddress = argv[optind];
-        } else {
-            DieWithUserMessage("Usage: ", "<Server Address>");
         }
         
         //DO NOT FORGET TO CHANGE THIS
